@@ -47,16 +47,13 @@ Known issues:
 
 * Some CNAME records are not signed correctly.
 
-* The automatic policy-based key rotation does not work. The rotation events are
-  invoked just at server (re)load.
+* The automatic policy-based key rotation is strongly discouraged.
 
 Limitations:
 
 * Online-sign module always enforces Single-Type Signing scheme.
 
-* Only one active signing key can be used.
-
-* Key rollover is not possible.
+* After any change to KASP DB, Knot must be reloaded to apply the changed keys.
 
 * The NSEC records may differ for one domain name if queried for different
   types. This is an implementation shortcoming as the dynamic modules
