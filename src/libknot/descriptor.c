@@ -369,3 +369,63 @@ bool knot_rrtype_should_be_lowercased(const uint16_t type)
 	       type == KNOT_RRTYPE_DNAME ||
 	       type == KNOT_RRTYPE_RRSIG;
 }
+
+_public_
+int knot_opt_code_to_string(const uint16_t opt_code, char *out,
+                                 const size_t out_len) {
+	if (out == NULL) {
+		return -1;
+	}
+
+	int ret;
+
+	switch(opt_code) {
+	case 1:
+		ret = snprintf(out, out_len, "LLQ");
+		break;
+	case 2:
+		ret = snprintf(out, out_len, "UL");
+		break;
+	case 3:
+		ret = snprintf(out, out_len, "NSID");
+		break;
+	case 5:
+		ret = snprintf(out, out_len, "DAU");
+		break;
+	case 6:
+		ret = snprintf(out, out_len, "DHU");
+		break;
+	case 7:
+		ret = snprintf(out, out_len, "N3U");
+		break;
+	case 8:
+		ret = snprintf(out, out_len, "EDNS-CLIENT-SUBNET");
+		break;
+	case 9:
+		ret = snprintf(out, out_len, "EDNS-EXPIRE");
+		break;
+	case 10:
+		ret = snprintf(out, out_len, "COOKIE");
+		break;
+	case 11:
+		ret = snprintf(out, out_len, "EDNS-TCP-KEEPALIVE");
+		break;
+	case 12:
+		ret = snprintf(out, out_len, "PADDING");
+		break;
+	case 13:
+		ret = snprintf(out, out_len, "CHAIN");
+		break;
+	case 14:
+		ret = snprintf(out, out_len, "EDNS-KEY-TAG");
+		break;
+	default:
+		ret = snprintf(out, out_len, "TYPE%u", opt_code);
+	}
+
+	if (ret <= 0 || (size_t)ret > out_len) {
+		return -1;
+	} else {
+		return ret;
+	}
+}

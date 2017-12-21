@@ -283,4 +283,10 @@ int knot_rrtype_additional_needed(const uint16_t type);
  */
 bool knot_rrtype_should_be_lowercased(const uint16_t type);
 
+/*!
+ * \brief Translates option code to string.
+ */
+int knot_opt_code_to_string(const uint16_t opt_code, char *out,
+                              const size_t out_len);
+
 /*! @} */

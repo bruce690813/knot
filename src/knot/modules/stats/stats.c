@@ -29,6 +29,7 @@
 #define MOD_QTYPE	"\x0A""query-type"
 #define MOD_QSIZE	"\x0A""query-size"
 #define MOD_RSIZE	"\x0A""reply-size"
+#define MOD_OPT_CODE	"\x08""opt-code"
 
 #define OTHER		"other"
 
@@ -44,6 +45,7 @@ const yp_item_t stats_conf[] = {
 	{ MOD_QTYPE,      YP_TBOOL, YP_VNONE },
 	{ MOD_QSIZE,      YP_TBOOL, YP_VNONE },
 	{ MOD_RSIZE,      YP_TBOOL, YP_VNONE },
+	{ MOD_OPT_CODE,   YP_TBOOL, YP_VNONE },
 	{ NULL }
 };
 
@@ -59,6 +61,7 @@ enum {
 	CTR_QTYPE,
 	CTR_QSIZE,
 	CTR_RSIZE,
+	CTR_OPT_CODE,
 };
 
 typedef struct {
@@ -73,6 +76,7 @@ typedef struct {
 	bool qtype;
 	bool qsize;
 	bool rsize;
+	bool opt_code;
 } stats_t;
 
 typedef struct {
@@ -301,6 +305,22 @@ static char *rsize_to_str(uint32_t idx, uint32_t count) {
 	return size_to_str(idx, count);
 }
 
+#define OPT_CODE_MAX 14
+#define OPT_CODE_COUNT OPT_CODE_MAX + 1
+
+static char *opt_code_to_str(uint32_t idx, uint32_t count) {
+	if (idx > OPT_CODE_MAX) {
+		return strdup(OTHER);
+	}
+	char str[32];
+	int ret = knot_opt_code_to_string(idx, str, sizeof(str));
+	if (ret < 0) {
+		return NULL;
+	} else {
+		return strdup(str);
+	}
+}
+
 static const ctr_desc_t ctr_descs[] = {
 	#define item(macro, name, count) \
 		[CTR_##macro] = { MOD_##macro, offsetof(stats_t, name), (count), name##_to_str }
@@ -315,6 +335,7 @@ static const ctr_desc_t ctr_descs[] = {
 	item(QTYPE,      qtype,      QTYPE__COUNT),
 	item(QSIZE,      qsize,      QSIZE_MAX_IDX + 1),
 	item(RSIZE,      rsize,      RSIZE_MAX_IDX + 1),
+	item(OPT_CODE,   opt_code,   OPT_CODE_COUNT + 1),
 	{ NULL }
 };
 
@@ -521,6 +542,14 @@ static knotd_state_t update_counters(knotd_state_t state, knot_pkt_t *pkt,
 		knotd_mod_stats_incr(mod, CTR_RSIZE, MIN(idx, RSIZE_MAX_IDX), 1);
 	}
 
+	// Count the EDNS OPT code.
+	if (stats->opt_code && qdata->query->opt_rr != NULL) {
+		for (uint16_t idx = 1; idx <= 14; idx++) {
+			if (knot_edns_has_option(pkt->opt_rr, idx)) {
+				knotd_mod_stats_incr(mod, CTR_OPT_CODE, idx, 1);
+			}
+		}
+	}
 	return state;
 }
 
