@@ -50,6 +50,8 @@ enum knot_edns_const {
 	KNOT_EDNS_EXT_RCODE_POS            = 5,
 	/*! \brief EDNS OPTION header size. */
 	KNOT_EDNS_OPTION_HDRLEN            = 4,
+	/*! \brief Maximal currently relevant option code. */
+	KNOT_EDNS_MAX_OPTION_CODE          = 14,
 	/*! \brief Maximal edns client subnet data size (IPv6). */
 	KNOT_EDNS_MAX_OPTION_CLIENT_SUBNET = 20,
 	/*! \brief Maximal size of EDNS client subnet address in bytes (IPv6). */
@@ -361,6 +363,21 @@ static inline uint8_t *knot_edns_opt_get_data(uint8_t *opt)
  * \return true if passed, false if failed
  */
 bool knot_edns_check_record(knot_rrset_t *opt_rr);
+
+/*!
+ * \brief Pointers to every option in the OPT RR wire.
+ */
+typedef struct knot_edns_opt_wire {
+	uint8_t *ptr[KNOT_EDNS_MAX_OPTION_CODE + 1];
+} knot_edns_opt_wire_t;
+
+/*!
+ * \brief knot_edns_opt_wire_init
+ * \param ptrs
+ * \return
+ */
+int knot_edns_opt_wire_init(knot_rrset_t *opt_rr,
+                            knot_edns_opt_wire_t *out);
 
 /*!
  * \brief Computes a reasonable Padding data length for a given packet and opt RR.

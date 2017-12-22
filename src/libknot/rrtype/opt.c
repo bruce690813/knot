@@ -501,6 +501,39 @@ bool knot_edns_check_record(knot_rrset_t *opt_rr)
 }
 
 _public_
+int knot_edns_opt_wire_init(knot_rrset_t *opt_rr,
+                            knot_edns_opt_wire_t *out)
+{
+	if (out == NULL) {
+		return KNOT_EINVAL;
+	}
+
+	knot_rdata_t *rdata = knot_rdataset_at(&opt_rr->rrs, 0);
+	if (rdata == NULL) {
+		return KNOT_EINVAL;
+	}
+
+	wire_ctx_t wire = wire_ctx_init_const(rdata->data, rdata->len);
+
+	for (int i = 0; i <= KNOT_EDNS_MAX_OPTION_CODE; i++) {
+		out->ptr[i] = NULL;
+	}
+
+	while (wire_ctx_available(&wire) > 0 && wire.error == KNOT_EOK) {
+		uint16_t opt_code = wire_ctx_read_u16(&wire); 			// code
+		uint16_t opt_len = wire_ctx_read_u16(&wire);	// length
+		wire_ctx_skip(&wire, opt_len);			// data
+		if (wire.error == KNOT_EOK) {
+			out->ptr[opt_code] = wire.position;
+		} else {
+			return wire.error;
+		}
+	}
+
+	return wire.error;
+}
+
+_public_
 int knot_edns_default_padding_size(const knot_pkt_t *pkt,
                                    const knot_rrset_t *opt_rr)
 {

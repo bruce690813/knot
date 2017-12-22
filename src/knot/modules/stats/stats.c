@@ -305,7 +305,7 @@ static char *rsize_to_str(uint32_t idx, uint32_t count) {
 	return size_to_str(idx, count);
 }
 
-#define OPT_CODE_MAX 14
+#define OPT_CODE_MAX KNOT_EDNS_MAX_OPTION_CODE
 #define OPT_CODE_COUNT OPT_CODE_MAX + 1
 
 static char *opt_code_to_str(uint32_t idx, uint32_t count) {
@@ -544,8 +544,10 @@ static knotd_state_t update_counters(knotd_state_t state, knot_pkt_t *pkt,
 
 	// Count the EDNS OPT code.
 	if (stats->opt_code && qdata->query->opt_rr != NULL) {
+		knot_edns_opt_wire_t ptrs;
+		knot_edns_opt_wire_init(qdata->query->opt_rr, &ptrs);
 		for (uint16_t idx = 1; idx <= 14; idx++) {
-			if (knot_edns_has_option(pkt->opt_rr, idx)) {
+			if (ptrs.ptr[idx] != NULL) {
 				knotd_mod_stats_incr(mod, CTR_OPT_CODE, idx, 1);
 			}
 		}
