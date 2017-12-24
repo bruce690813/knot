@@ -19,6 +19,7 @@
 #include <stdlib.h>
 
 #include "binary.h"
+#include "wire.h"
 
 /*!
  * Size needed to write unsigned number in unsigned encoding.
@@ -37,4 +38,4 @@ size_t bignum_size_s(const dnssec_binary_t *value);
  *
  * The destination size has to be set properly to accommodate used encoding.
  */
-void bignum_write(dnssec_binary_t *dest, const dnssec_binary_t *value);
+void bignum_write(wire_ctx_t *ctx, size_t width, const dnssec_binary_t *value);

@@ -42,7 +42,7 @@ static void wire_write_bignum_datum(wire_ctx_t *ctx, size_t width,
 				    const gnutls_datum_t *_bignum)
 {
 	const dnssec_binary_t bignum = binary_from_datum(_bignum);
-	wire_write_bignum(ctx, width, &bignum);
+	bignum_write(ctx, width, &bignum);
 }
 
 static gnutls_datum_t wire_take_datum(wire_ctx_t *ctx, size_t count)

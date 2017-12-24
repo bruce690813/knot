@@ -51,17 +51,16 @@ size_t bignum_size_s(const dnssec_binary_t *_value)
 	}
 }
 
-void bignum_write(dnssec_binary_t *dest, const dnssec_binary_t *_value)
+void bignum_write(wire_ctx_t *ctx, size_t width, const dnssec_binary_t *_value)
 {
 	dnssec_binary_t value = *_value;
 	skip_leading_zeroes(&value);
 
-	assert(dest->size >= value.size);
-
-	size_t padding = dest->size - value.size;
-	if (padding > 0) {
-		memset(dest->data, 0, padding);
+	size_t padding_len = width - value.size;
+	if (padding_len > 0) {
+		uint8_t padding[padding_len];
+		memset(padding, 0, padding_len);
+		wire_write(ctx, padding, padding_len);
 	}
-
-	memmove(dest->data + padding, value.data, value.size);
+	wire_write(ctx, value.data, value.size);
 }

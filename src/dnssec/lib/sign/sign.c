@@ -141,8 +141,8 @@ static int ecdsa_x509_to_dnssec(dnssec_sign_ctx_t *ctx,
 	}
 
 	wire_ctx_t wire = wire_init_binary(dnssec);
-	wire_write_bignum(&wire, int_size, &value_r);
-	wire_write_bignum(&wire, int_size, &value_s);
+	bignum_write(&wire, int_size, &value_r);
+	bignum_write(&wire, int_size, &value_s);
 	assert(wire_tell(&wire) == dnssec->size);
 
 	return DNSSEC_EOK;

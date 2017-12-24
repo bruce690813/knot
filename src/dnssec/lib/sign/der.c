@@ -127,7 +127,7 @@ static void asn1_write_integer(wire_ctx_t *wire, size_t integer_size,
 	assert(integer->data);
 
 	asn1_write_header(wire, ASN1_TYPE_INTEGER, integer_size);
-	wire_write_bignum(wire, integer_size, integer);
+	bignum_write(wire, integer_size, integer);
 }
 
 /*!
