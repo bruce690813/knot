@@ -17,6 +17,7 @@
 #include "contrib/ctype.h"
 #include "contrib/net.h"
 #include "contrib/sockaddr.h"
+#include "contrib/wire_ctx.h"
 #include "knot/include/module.h"
 
 #define MOD_NET		"\x07""network"
@@ -89,7 +90,11 @@ int synth_record_conf_check(knotd_conf_check_args_t *args)
 }
 
 /* Defines. */
-#define ARPA_ZONE_LABELS 2
+#define ARPA_ZONE_LABELS	2
+#define IPV4_ADDR_LABELS	4
+#define IPV6_ADDR_LABELS	32
+#define IPV4_ARPA_DNAME		(uint8_t *)"\x07""in-addr""\x04""arpa"
+#define IPV6_ARPA_DNAME		(uint8_t *)"\x03""ip6""\x04""arpa"
 
 /*!
  * \brief Synthetic response template.
@@ -148,43 +153,64 @@ static int reverse_addr_parse(knotd_qdata_t *qdata, char *addr_str, int *addr_fa
 	 * f.e.  [1.0...0].[h.g.f.e.0.0.0.0.d.c.b.a.ip6.arpa] represents
 	 *       [abcd:0:efgh::1] */
 	const knot_dname_t *label = qdata->name;
-	const uint8_t *query_wire = qdata->query->wire;
+	const uint8_t *wire = qdata->query->wire;
 
-	/* Push labels on stack for reverse walkthrough. */
-	const uint8_t *label_stack[KNOT_DNAME_MAXLABELS];
-	const uint8_t **sp = label_stack;
-	int label_count = knot_dname_labels(label, query_wire);
-	while (label_count > ARPA_ZONE_LABELS) {
-		*sp++ = label;
-		label = knot_wire_next_label(label, query_wire);
-		--label_count;
-	}
+	switch (knot_dname_labels(label, wire)) {
+	case IPV4_ADDR_LABELS + ARPA_ZONE_LABELS:
+		*addr_family = AF_INET;
 
-	/* Determine family requested by query. */
-	*addr_family = (strncmp((const char *)label, "\003ip6", 4) == 0 ?
-	                AF_INET6 : AF_INET);
+		const knot_dname_t *label1 = label;
+		const knot_dname_t *label2 = knot_wire_next_label(label1, wire);
+		const knot_dname_t *label3 = knot_wire_next_label(label2, wire);
+		const knot_dname_t *label4 = knot_wire_next_label(label3, wire);
+		assert(label1 && label2 && label3 && label4);
 
-	/* Write formatted address string. */
-	char sep = str_separator(*addr_family);
-	int sep_frequency = 1;
-	if (sep == ':') {
-		sep_frequency = 4; /* Separator per 4 hexdigits. */
-	}
-
-	char *dst = addr_str;
-	label_count = 0;
-	while (sp != label_stack) {
-		label = *--sp;
-		/* Write separator for each Nth label. */
-		if (label_count == sep_frequency) {
-			*dst = sep;
-			dst += 1;
-			label_count = 0;
+		label  = knot_wire_next_label(label4, wire);
+		if (!knot_dname_is_equal(label, IPV4_ARPA_DNAME)) {
+			return KNOT_EINVAL;
 		}
-		/* Write label. */
-		memcpy(dst, label + 1, label[0]);
-		dst += label[0];
-		label_count += 1;
+
+		 // 255.255.255.255
+		wire_ctx_t ctx = wire_ctx_init((uint8_t *)addr_str,
+		                               IPV4_ADDR_LABELS * 3 + 3 + 1);
+		wire_ctx_write(&ctx, label4 + 1, label4[0]);
+		wire_ctx_write_u8(&ctx, '.');
+		wire_ctx_write(&ctx, label3 + 1, label3[0]);
+		wire_ctx_write_u8(&ctx, '.');
+		wire_ctx_write(&ctx, label2 + 1, label2[0]);
+		wire_ctx_write_u8(&ctx, '.');
+		wire_ctx_write(&ctx, label1 + 1, label1[0]);
+		wire_ctx_write_u8(&ctx, '\0');
+		if (ctx.error != KNOT_EOK) {
+			return ctx.error;
+		}
+
+		break;
+	case IPV6_ADDR_LABELS + ARPA_ZONE_LABELS:
+		*addr_family = AF_INET6;
+
+		// 1-char labels + separators.
+		const int addr_len = IPV6_ADDR_LABELS + 7;
+		for (int i = 1; i <= addr_len; i++) {
+			if (i % 5 == 0) {
+				addr_str[addr_len - i] = ':';
+			} else if (label[0] == 1) {
+				addr_str[addr_len - i] = label[1];
+				label = knot_wire_next_label(label, wire);
+				assert(label);
+			} else {
+				return KNOT_EINVAL;
+			}
+		}
+		addr_str[addr_len] = '\0';
+
+		if (!knot_dname_is_equal(label, IPV6_ARPA_DNAME)) {
+			return KNOT_EINVAL;
+		}
+
+		break;
+	default:
+		return KNOT_EINVAL;
 	}
 
 	return KNOT_EOK;
@@ -193,16 +219,18 @@ static int reverse_addr_parse(knotd_qdata_t *qdata, char *addr_str, int *addr_fa
 static int forward_addr_parse(knotd_qdata_t *qdata, const synth_template_t *tpl,
                               char *addr_str, int *addr_family)
 {
-	/* Find prefix label count (additive to prefix length). */
-	const knot_dname_t *addr_label = qdata->name;
+	const knot_dname_t *label = qdata->name;
 
-	/* Mismatch if label shorter/equal than prefix. */
-	if (addr_label == NULL || addr_label[0] <= tpl->prefix_len) {
+	/* Check for prefix mismatch. */
+	if (label[0] <= tpl->prefix_len ||
+	    memcmp(label + 1, tpl->prefix, tpl->prefix_len) != 0) {
 		return KNOT_EINVAL;
 	}
 
-	int addr_len = *addr_label - tpl->prefix_len;
-	memcpy(addr_str, addr_label + 1 + tpl->prefix_len, addr_len);
+	/* Copy address part. */
+	int addr_len = label[0] - tpl->prefix_len;
+	memcpy(addr_str, label + 1 + tpl->prefix_len, addr_len);
+	addr_str[addr_len] = '\0';
 
 	/* Determine query family: v6 if *-ABCD.zone. */
 	const char *last_octet = addr_str + addr_len;
@@ -219,13 +247,6 @@ static int forward_addr_parse(knotd_qdata_t *qdata, const synth_template_t *tpl,
 static int addr_parse(knotd_qdata_t *qdata, const synth_template_t *tpl, char *addr_str,
                       int *addr_family)
 {
-	/* Check if we have at least 1 label below zone. */
-	int zone_labels = knot_dname_labels(knotd_qdata_zone_name(qdata), NULL);
-	int query_labels = knot_dname_labels(qdata->name, qdata->query->wire);
-	if (query_labels < zone_labels + 1) {
-		return KNOT_EINVAL;
-	}
-
 	switch (tpl->type) {
 	case SYNTH_REVERSE: return reverse_addr_parse(qdata, addr_str, addr_family);
 	case SYNTH_FORWARD: return forward_addr_parse(qdata, tpl, addr_str, addr_family);
@@ -236,30 +257,23 @@ static int addr_parse(knotd_qdata_t *qdata, const synth_template_t *tpl, char *a
 static knot_dname_t *synth_ptrname(uint8_t *out, const char *addr_str,
                                    const synth_template_t *tpl, int addr_family)
 {
-	/* PTR right-hand value is [prefix][address][zone] */
 	char ptrname[KNOT_DNAME_TXT_MAXLEN];
 	int addr_len = strlen(addr_str);
+	char sep = str_separator(addr_family);
 
-	/* Check required space (zone requires extra leading dot). */
-	if (tpl->prefix_len + addr_len + 1 + tpl->zone_len + 1 >= KNOT_DNAME_TXT_MAXLEN) {
+	/* PTR right-hand value is [prefix][address][zone] */
+	wire_ctx_t ctx = wire_ctx_init((uint8_t *)ptrname, sizeof(ptrname));
+	wire_ctx_write(&ctx, tpl->prefix, tpl->prefix_len);
+	wire_ctx_write(&ctx, addr_str, addr_len);
+	wire_ctx_write_u8(&ctx, '.');
+	wire_ctx_write(&ctx, tpl->zone, tpl->zone_len);
+	wire_ctx_write_u8(&ctx, '\0');
+	if (ctx.error != KNOT_EOK) {
 		return NULL;
 	}
 
-	/* Write prefix string. */
-	memcpy(ptrname, tpl->prefix, tpl->prefix_len);
-	int written = tpl->prefix_len;
-
-	/* Write address with substituted separator to '-'. */
-	char sep = str_separator(addr_family);
-	memcpy(ptrname + written, addr_str, addr_len);
-	str_subst(ptrname + written, addr_len, sep, '-');
-	written += addr_len;
-
-	/* Write zone name. */
-	ptrname[written] = '.';
-	written += 1;
-	memcpy(ptrname + written, tpl->zone, tpl->zone_len);
-	ptrname[written + tpl->zone_len] = '\0';
+	/* Substitute address separator to '-'. */
+	str_subst(ptrname + tpl->prefix_len, addr_len, sep, '-');
 
 	/* Convert to domain name. */
 	return knot_dname_from_str(out, ptrname, KNOT_DNAME_MAXLEN);
@@ -283,7 +297,7 @@ static int reverse_rr(char *addr_str, const synth_template_t *tpl, knot_pkt_t *p
 static int forward_rr(char *addr_str, const synth_template_t *tpl, knot_pkt_t *pkt,
                       knot_rrset_t *rr, int addr_family)
 {
-	struct sockaddr_storage query_addr = {'\0'};
+	struct sockaddr_storage query_addr;
 	sockaddr_set(&query_addr, addr_family, addr_str, 0);
 
 	/* Specify address type and data. */
@@ -333,18 +347,14 @@ static knot_rrset_t *synth_rr(char *addr_str, const synth_template_t *tpl, knot_
 static knotd_in_state_t template_match(knotd_in_state_t state, const synth_template_t *tpl,
                                        knot_pkt_t *pkt, knotd_qdata_t *qdata)
 {
-	/* Parse address from query name. */
-	char addr_str[SOCKADDR_STRLEN] = { '\0' };
-	int provided_af = 0;
-	int ret = addr_parse(qdata, tpl, addr_str, &provided_af);
-	if (ret != KNOT_EOK) {
-		return state; /* Can't identify addr in QNAME, not applicable. */
-	}
+	int provided_af = AF_UNSPEC;
+	struct sockaddr_storage query_addr;
+	char addr_str[SOCKADDR_STRLEN];
+	assert(SOCKADDR_STRLEN > KNOT_DNAME_MAXLABELLEN);
 
-	/* Match against template netblock. */
-	struct sockaddr_storage query_addr = { '\0' };
-	ret = sockaddr_set(&query_addr, provided_af, addr_str, 0);
-	if (ret != KNOT_EOK) {
+	/* Parse address from query name. */
+	if (addr_parse(qdata, tpl, addr_str, &provided_af) != KNOT_EOK ||
+	    sockaddr_set(&query_addr, provided_af, addr_str, 0) != KNOT_EOK) {
 		return state;
 	}
 
@@ -385,7 +395,7 @@ static knotd_in_state_t template_match(knotd_in_state_t state, const synth_templ
 		}
 		break;
 	default:
-		break;
+		return state;
 	}
 
 	/* Synthetise record from template. */
